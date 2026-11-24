@@ -464,6 +464,7 @@
                 break
             case 'remove': {
                 const targetId = getSessionId(item)
+                contactStore.hiddenSessionIds.add(targetId)
                 contactStore.baseOnMsgList.delete(targetId)
                 updateBaseOnMsgList()
                 refreshFavicon()

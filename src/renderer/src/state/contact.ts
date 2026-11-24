@@ -7,6 +7,7 @@ export const useContactStore = defineStore('contact', () => {
     const showList = shallowRef<(UserFriendElem & UserGroupElem)[]>([])
     const groupAssistList = shallowRef<(UserFriendElem & UserGroupElem)[]>([])
     const baseOnMsgList = reactive(new Map<number, UserFriendElem & UserGroupElem>())
+    const hiddenSessionIds = reactive(new Set<number>())
     const onMsgList = shallowRef<(UserFriendElem & UserGroupElem)[]>([])
     const newMsgCount = ref(0)
     const systemNoticesList = shallowRef<Record<string, any> | undefined>(undefined)
@@ -16,6 +17,7 @@ export const useContactStore = defineStore('contact', () => {
         showList,
         groupAssistList,
         baseOnMsgList,
+        hiddenSessionIds,
         onMsgList,
         newMsgCount,
         systemNoticesList,

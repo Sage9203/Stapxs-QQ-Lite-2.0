@@ -508,6 +508,7 @@ export function sendMsgRaw(
                 raw_msg_base: raw,
                 time: showMsg.time * 1000,
             })
+            contactStore.hiddenSessionIds.delete(sessionId)
             contactStore.baseOnMsgList.set(sessionId, session)
             updateBaseOnMsgList()
         }
@@ -629,6 +630,7 @@ function getSessionList() {
     contactStore.baseOnMsgList.forEach((item, id) => {
         sessionMap.set(id, item)
     })
+    contactStore.hiddenSessionIds.forEach(id => sessionMap.delete(id))
 
     return [...sessionMap.values()]
 }

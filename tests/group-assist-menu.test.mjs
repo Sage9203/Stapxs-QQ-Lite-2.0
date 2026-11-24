@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import test from 'node:test'
 import {
     getSessionId,
@@ -7,6 +8,50 @@ import {
     isSessionMenuTarget,
     toggleAccountSessionId,
 } from '../src/renderer/src/function/utils/sessionUtil.ts'
+
+test('removing a group keeps it out of the all-sessions view after a history refresh', () => {
+    const messages = readFileSync(new URL('../src/renderer/src/pages/Messages.vue', import.meta.url), 'utf8')
+    const utilities = readFileSync(new URL('../src/renderer/src/function/utils/msgUtil.ts', import.meta.url), 'utf8')
+    const removeMenu = messages.match(/^    function listMenuClose\([\s\S]*?^    \}/m)?.[0]
+    const sessionList = utilities.match(/^function getSessionList\([\s\S]*?^\}/m)?.[0]
+    assert.ok(removeMenu && sessionList)
+
+    const removed = { user_id: 0, group_id: 24680 }
+    const other = { user_id: 12345 }
+    const contactStore = {
+        userList: [removed, other],
+        baseOnMsgList: new Map([[24680, removed]]),
+        hiddenSessionIds: new Set(),
+    }
+    const menu = { select: removed }
+    const dependencies = {
+        getSessionId,
+        isSessionMenuTarget,
+        useContactStore: () => contactStore,
+        useSettingsStore: () => ({ sysConfig: { session_display_mode: 'all' } }),
+        contactStore,
+        menu,
+        listMenu: { value: {} },
+        document: { getElementById: () => null },
+        updateBaseOnMsgList() {},
+        refreshFavicon() {},
+    }
+    const create = new Function(
+        ...Object.keys(dependencies),
+        stripTypeScriptTypes(removeMenu + '\n' + sessionList) + '\nreturn { listMenuClose, getSessionList }',
+    )
+    const { listMenuClose, getSessionList } = create(...Object.values(dependencies))
+
+    assert.ok(getSessionList().includes(removed))
+    listMenuClose('remove')
+    assert.deepEqual(getSessionList(), [other])
+    assert.deepEqual(contactStore.userList, [removed, other])
+
+    contactStore.baseOnMsgList.set(24680, { ...removed, time: 100 })
+    assert.deepEqual(getSessionList(), [other])
+    contactStore.hiddenSessionIds.delete(24680)
+    assert.ok(getSessionList().some((item) => item.group_id === 24680))
+})
 
 test('getSessionId resolves valid group_id even when user_id is 0', () => {
     assert.equal(getSessionId({ user_id: 0, group_id: 123456 }), 123456)

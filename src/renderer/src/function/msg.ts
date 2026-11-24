@@ -2387,6 +2387,7 @@ function newMsg(_: string, data: any) {
                 if (data.atall) { session.highlight = $t('[@全体]') }
                 if (isImportant) { session.highlight = $t('[特別关心]') }
             }
+            contactStore.hiddenSessionIds.delete(sessionId)
             contactStore.baseOnMsgList.set(sessionId, session)
             updateBaseOnMsgList()
         }
@@ -2505,6 +2506,7 @@ export function resetRimtime(resetAll = false) {
         contactStore.showList = reactive([])
         contactStore.systemNoticesList = reactive([])
         contactStore.baseOnMsgList = reactive(new Map())
+        contactStore.hiddenSessionIds.clear()
         contactStore.onMsgList = reactive([])
         contactStore.groupAssistList = reactive([])
         // Reset chat store
