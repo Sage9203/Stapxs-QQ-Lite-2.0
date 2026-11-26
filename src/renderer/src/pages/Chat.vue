@@ -809,6 +809,7 @@ const scrollAnchor = createChatScrollAnchor({
         return Math.max(chatPadding.value?.offsetHeight ?? 0, paddingBottom)
     },
     isSuspended: () => replyLoading.value || Boolean(replyAnchor) || details.value[3].open,
+    isInputSuspended: () => details.value[3].open,
     onPinnedChange: (pinned) => {
         if (pinned) {
             NewMsgNum.value = 0

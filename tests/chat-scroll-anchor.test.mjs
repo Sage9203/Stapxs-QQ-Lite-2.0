@@ -512,3 +512,43 @@ test('source invariants cover msg.ts, appUtil.ts, Chat.vue, and chat.css fixes',
     assert.match(chatVue, /function chatScroll\(event: Event, pass: boolean\) \{\s*\r?\n\s*if \(pass\) return/)
     assert.match(chatVue, /searchJumpTimer/)
 })
+
+test('search input leaves the reading position of the original timeline intact', () => {
+    let searching = false
+    const listeners = new Map()
+    const row = { offsetHeight: 20, offsetTop: 480, id: 'm', isConnected: true }
+    const pane = {
+        clientHeight: 600,
+        scrollTop: 100,
+        scrollHeight: 2000,
+        style: {},
+        addEventListener(type, handler) { listeners.set(type, handler) },
+        removeEventListener(type) { listeners.delete(type) },
+        contains(element) { return element === row },
+    }
+    const timeline = { children: [row] }
+    const anchor = createChatScrollAnchor({
+        getPan: () => pane,
+        getContent: () => searching ? null : timeline,
+        isSuspended: () => searching,
+        isInputSuspended: () => searching,
+    })
+    anchor.attach()
+    try {
+        anchor.handleScroll()
+        searching = true
+        pane.scrollHeight = 900
+        pane.scrollTop = 150
+        listeners.get('wheel')({ deltaY: -40 })
+        listeners.get('keydown')({ key: 'PageUp' })
+        listeners.get('pointerdown')()
+        listeners.get('pointerup')()
+        searching = false
+        pane.scrollHeight = 2000
+        pane.scrollTop = 0
+        anchor.reconcile()
+        assert.equal(pane.scrollTop, 100)
+    } finally {
+        anchor.detach()
+    }
+})

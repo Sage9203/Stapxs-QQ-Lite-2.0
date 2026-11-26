@@ -219,6 +219,7 @@ export interface ChatScrollAnchorOptions {
     getContent: () => HTMLElement | null
     getBottomInset?: () => number
     isSuspended?: () => boolean
+    isInputSuspended?: () => boolean
     onPinnedChange?: (pinned: boolean) => void
     bottomThreshold?: number
 }
@@ -678,6 +679,7 @@ export function createChatScrollAnchor(
     }
 
     function onWheel(event: Event) {
+        if (options.isInputSuspended?.()) return
         const pan = options.getPan()
         if (!pan || !hasValidSize(pan)) return
         const wheelEvent = event as WheelEvent
@@ -698,6 +700,7 @@ export function createChatScrollAnchor(
     }
 
     function onPointerStart() {
+        if (options.isInputSuspended?.()) return
         isPointerInteracting = true
         pendingReconcileAfterInteraction = false
         const pan = options.getPan()
@@ -711,6 +714,10 @@ export function createChatScrollAnchor(
     function onPointerEnd() {
         if (!isPointerInteracting) return
         isPointerInteracting = false
+        if (options.isInputSuspended?.()) {
+            pendingReconcileAfterInteraction = false
+            return
+        }
         const pan = options.getPan()
         if (!pan || !hasValidSize(pan)) {
             pendingReconcileAfterInteraction = false
@@ -733,6 +740,7 @@ export function createChatScrollAnchor(
     }
 
     function onKeyDown(event: KeyboardEvent) {
+        if (options.isInputSuspended?.()) return
         const key = event?.key
         const isUpKey = ['ArrowUp', 'PageUp', 'Home'].includes(key)
         const isNavKey =
@@ -759,6 +767,7 @@ export function createChatScrollAnchor(
         if (!activeAnimation) return
         const finished = activeAnimation
         activeAnimation = null
+        if (options.isInputSuspended?.()) return
         const pan = options.getPan()
         if (!pan || !hasValidSize(pan)) return
         if (finished.kind === 'bottom') {
