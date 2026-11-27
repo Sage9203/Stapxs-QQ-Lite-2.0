@@ -174,13 +174,14 @@ test('pure helpers classify list changes, count trailing appends, preserve live 
         { message_id: 'm-20', time: 200 },
     ]
     assert.deepEqual(
-        preserveTrailingLiveMessages(current, replacement).map((m) => m.message_id),
+        preserveTrailingLiveMessages(current, replacement, new Set(['old-1', 'm-19', 'm-20'])).map((m) => m.message_id),
         ['m-19', 'm-20', 'live-21', 'uuid-1'],
     )
     assert.deepEqual(
         preserveTrailingLiveMessages(
             [{ message_id: 'old-1', time: 10 }, { message_id: 'm-20', time: 200 }],
             replacement,
+            new Set(['old-1', 'm-20']),
         ).map((m) => m.message_id),
         ['m-19', 'm-20'],
     )
@@ -491,10 +492,6 @@ test('source invariants cover msg.ts, appUtil.ts, Chat.vue, and chat.css fixes',
     assert.doesNotMatch(historyRespMatch[0], /scrollTop/)
     assert.match(msgTs, /preserveTrailingLiveMessages/)
 
-    // Sourcery #6 & #7: verify loadHistory only clears when clearBeforeLoad and scrollToMsg invokes registered jump handler
-    const loadHistoryMatch = appUtil.match(/export async function loadHistory[\s\S]*?\n\}/)
-    assert.ok(loadHistoryMatch)
-    assert.match(loadHistoryMatch[0], /if\s*\(clearBeforeLoad\)\s*\{\s*\r?\n\s*chatStore\.messageList = \[\]/)
     const scrollToMsgMatch = appUtil.match(/export function scrollToMsg[\s\S]*?\n\}/)
     assert.ok(scrollToMsgMatch)
     assert.match(scrollToMsgMatch[0], /chatScrollJumpHandler\?\.\(msg,/)
@@ -506,7 +503,9 @@ test('source invariants cover msg.ts, appUtil.ts, Chat.vue, and chat.css fixes',
     assert.match(chatVue, /getContent:\s*\(\)\s*=>\s*\(msgListGroup\.value as any\)\?\.\$el \?\? null/)
     assert.match(chatVue, /if \(!details\.value\[3\]\.open && \(changeKind === 'prepend' \|\| !wasPinned\) && oldLength > 0\)/)
     assert.match(chatVue, /countAppendedMessages/)
-    assert.match(chatVue, /void loadHistoryFirst\(info, \{ clearBeforeLoad: false \}\)[\s\S]*?\.catch\(\(\)\s*=>\s*\{\s*\r?\n\s*trimReloadPending = false/)
+    assert.match(chatVue, /trimChatHistory\(request.signal\)/)
+    assert.match(chatVue, /if \(!pinned\) historyTrim\?\.abort\(\)/)
+    assert.match(appUtil, /chatStore\.messageList = \[\]/)
     assert.match(chatVue, /suppressListMoveAnimation/)
     assert.match(chatVue, /classifyMessageListChange/)
     assert.match(chatVue, /function chatScroll\(event: Event, pass: boolean\) \{\s*\r?\n\s*if \(pass\) return/)
@@ -551,4 +550,20 @@ test('search input leaves the reading position of the original timeline intact',
     } finally {
         anchor.detach()
     }
+})
+
+test('history trim retains pending sends and arrivals regardless of overlap or timestamp', () => {
+    const old = { message_id: 'old', time: 1 }
+    const pending = { message_id: 'pending', time: 21, fake_msg: true }
+    const late = { message_id: 'late', time: 19 }
+    const overlap = { message_id: 'overlap', time: 20 }
+    const live = { message_id: 'live', time: 22 }
+    const current = [old, pending, late, overlap, live]
+    const idsAtRequest = new Set(['old', 'pending', 'overlap'])
+    assert.deepEqual(
+        preserveTrailingLiveMessages(current, [overlap, live], idsAtRequest),
+        [overlap, live, pending, late],
+    )
+    assert.equal(preserveTrailingLiveMessages(current, [], idsAtRequest), current)
+    assert.equal(preserveTrailingLiveMessages(current, [{ message_id: 'other' }], idsAtRequest), current)
 })

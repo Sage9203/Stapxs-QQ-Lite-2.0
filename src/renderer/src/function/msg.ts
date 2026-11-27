@@ -656,8 +656,7 @@ function handleChatHistoryResponse(
 
     if (!appendToTop) {
         // 无论是否有本地预填充，都以网络数据替换（保证最新消息不遗漏）
-        const replaceExisting = echoList?.[2] === 'replace'
-        saveMsg(msg, undefined, isActiveRequest, false, true, replaceExisting).catch(onError)
+        saveMsg(msg, undefined, isActiveRequest, false, true).catch(onError)
         return
     }
 
@@ -1749,13 +1748,51 @@ export async function appendHistoryForQuotedMessage(msg: any, isActive: () => bo
     await saveMsg(msg, 'top', isActive, true)
 }
 
+/** Refresh the latest window while the chat still owns the trim request. */
+export async function trimChatHistory(signal: AbortSignal) {
+    const chatStore = useChatStore()
+    const authStore = useAuthStore()
+    const chat = chatStore.chatInfo.show
+    const request = historyRequestTracker.current()
+    const map = authStore.jsonMap
+    const uin = authStore.loginInfo.uin
+    const isActive = () => !signal.aborted &&
+        historyRequestTracker.isActive(request?.generation, chatStore.chatInfo.show) &&
+        authStore.jsonMap === map && authStore.loginInfo.uin === uin &&
+        !useUIStore().nowGetHistory
+    if (!isActive() || !map.message_list) return
+
+    const idsAtRequest = new Set(chatStore.messageList.map(message => String(message.message_id)))
+    const isGroup = chat.type === 'group'
+    const action = isGroup ? map.message_list.name : map.message_list.private_name
+    const response = await Connector.callRawApi(action ?? 'get_chat_history', {
+        group_id: isGroup ? chat.id : undefined,
+        user_id: isGroup ? undefined : chat.id,
+        message_id: 0,
+        count: 20,
+    }, 10000)
+    if (!isActive() || response?.status !== 'ok' || Number(response.retcode ?? 0) !== 0 || response.data == null) return
+    const latest = await normalizeMessagesFromPayload(response)
+    if (!isActive() || !latest?.length || !isSavedMessageForCurrentChat(latest)) return
+
+    const current = chatStore.messageList
+    const next = preserveTrailingLiveMessages(current, latest, idsAtRequest)
+    if (next.length >= current.length) return
+    saveMessagesWithSideEffects(uin, latest)
+        .then(() => revokeEmptyHistoryRecords(uin, latest))
+        .catch(error => logger.error(error as Error, '保存历史消息到本地失败'))
+    replaceMessageListInPlace(next)
+    useUIStore().canLoadHistory = true
+    next.forEach(item => sendMsgAppendInfo(item))
+    updateSavedHistoryPreview()
+}
+
 async function saveMsg(
     msg: any,
     append = undefined as undefined | string,
     isActive = () => true,
     keepExisting = false,
     expandEmpty = false,
-    replaceExisting = false,
 ) {
     if (!isActive()) return
     let list = await normalizeMessagesFromPayload(msg, expandEmpty ? isActive : undefined)
@@ -1775,7 +1812,7 @@ async function saveMsg(
     saveMessagesWithSideEffects(selfId, list)
         .then(() => revokeEmptyHistoryRecords(selfId, list))
         .catch(error => logger.error(error as Error, '保存历史消息到本地失败'))
-    if (!applySavedMessages(list, append, keepExisting, replaceExisting)) return
+    if (!applySavedMessages(list, append, keepExisting)) return
     chatStore.messageList.forEach(item => sendMsgAppendInfo(item))
     updateSavedHistoryPreview()
     if (hasBoundary) uiStore.historyBeforeTime = undefined
@@ -1804,7 +1841,6 @@ function applySavedMessages(
     list: any[],
     append: string | undefined,
     keepExisting: boolean,
-    replaceExisting = false,
 ): boolean {
     const uiStore = useUIStore()
     const authStore = useAuthStore()
@@ -1816,12 +1852,6 @@ function applySavedMessages(
         uiStore.canLoadHistory = false
         uiStore.historyBeforeTime = undefined
         return false
-    }
-    if (replaceExisting && !isAppend) {
-        replaceMessageListInPlace(
-            preserveTrailingLiveMessages(chatStore.messageList, list),
-        )
-        return true
     }
     const mixed = settings.enable_local_history && settings.mixed_load_messages !== false
     const messages = isAppend || mixed ? mergeMessagesByIdAndTime(chatStore.messageList, list) : list

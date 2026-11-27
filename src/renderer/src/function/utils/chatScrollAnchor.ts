@@ -58,42 +58,21 @@ export function countAppendedMessages(
     return Math.max(0, nextIds.length - prevIds.length)
 }
 
-export function preserveTrailingLiveMessages<T extends Record<string, any>>(
+export function preserveTrailingLiveMessages<T extends { message_id: string | number; fake_msg?: boolean }>(
     currentList: T[],
     replacementList: T[],
+    idsAtRequest: ReadonlySet<string>,
 ): T[] {
-    if (replacementList.length === 0 || currentList.length === 0) {
-        return replacementList
-    }
-    const replacementIds = new Set<string>()
-    let latestTime = Number.NEGATIVE_INFINITY
-    for (const item of replacementList) {
-        if (item?.message_id != null) {
-            replacementIds.add(String(item.message_id))
-        }
-        const time = Number(item?.time)
-        if (Number.isFinite(time) && time > latestTime) {
-            latestTime = time
-        }
-    }
+    const replacementIds = new Set(replacementList.map(message => String(message.message_id)))
+    const firstOverlap = currentList.findIndex(message => replacementIds.has(String(message.message_id)))
+    if (firstOverlap === -1) return currentList
 
-    const trailing: T[] = []
-    for (let i = currentList.length - 1; i >= 0; i--) {
-        const item = currentList[i]
-        const id = item?.message_id != null ? String(item.message_id) : ''
-        if (id && replacementIds.has(id)) break
-        const isFake = item?.fake_msg === true
-        const time = Number(item?.time)
-        const isRecentOrUnstamped =
-            isFake ||
-            !Number.isFinite(latestTime) ||
-            (Number.isFinite(time) && time >= latestTime)
-        if (!isRecentOrUnstamped) break
-        trailing.push(item)
-    }
-    if (trailing.length === 0) return replacementList
-    trailing.reverse()
-    return [...replacementList, ...trailing]
+    const retained = currentList.filter((message, index) => {
+        const id = String(message.message_id)
+        return !replacementIds.has(id) &&
+            (index >= firstOverlap || message.fake_msg === true || !idsAtRequest.has(id))
+    })
+    return [...replacementList, ...retained]
 }
 
 export function isScrollAtBottom(

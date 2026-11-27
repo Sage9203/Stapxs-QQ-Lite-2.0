@@ -143,20 +143,13 @@ export function openLink(url: string) {
  * 加载历史消息
  * @param info 聊天基本信息
  */
-export async function loadHistory(
-    info: BaseChatInfoElem,
-    options?: { clearBeforeLoad?: boolean },
-): Promise<boolean> {
+export async function loadHistory(info: BaseChatInfoElem): Promise<boolean> {
     const authStore = useAuthStore()
     const chatStore = useChatStore()
     const uiStore = useUIStore()
     const settingsStore = useSettingsStore()
     const request = historyRequestTracker.begin(info)
-    const clearBeforeLoad = options?.clearBeforeLoad !== false
-
-    if (clearBeforeLoad) {
-        chatStore.messageList = []
-    }
+    chatStore.messageList = []
     uiStore.nowGetHistory = false
     uiStore.canLoadHistory = true
     uiStore.loadHistoryFail = false
@@ -164,7 +157,6 @@ export async function loadHistory(
 
     // 本地有数据时立即显示，同时仍发网络请求以获取最新消息（避免遗漏）
     if (
-        clearBeforeLoad &&
         settingsStore.sysConfig.enable_local_history &&
         settingsStore.sysConfig.mixed_load_messages !== false
     ) {
@@ -192,13 +184,7 @@ export async function loadHistory(
         info.id,
         info.type,
         20,
-        createHistoryEcho(
-            'getChatHistoryFist',
-            request,
-            clearBeforeLoad ? undefined : 'replace',
-        ),
-        0,
-        !clearBeforeLoad,
+        createHistoryEcho('getChatHistoryFist', request),
     )) {
         new PopInfo().add(
             PopType.ERR,
@@ -215,7 +201,6 @@ export function loadHistoryMessage(
     count = 20,
     echo?: string,
     messageId: string | number = 0,
-    ignoreExistingCount = false,
 ) {
     const authStore = useAuthStore()
     const chatStore = useChatStore()
@@ -239,7 +224,7 @@ export function loadHistoryMessage(
             group_id: type == 'group' ? id : undefined,
             user_id: type != 'group' ? id : undefined,
             message_id: messageId,
-            count: fullPage && !ignoreExistingCount ? chatStore.messageList.length + count : count,
+            count: fullPage ? chatStore.messageList.length + count : count,
         },
         echo,
     )

@@ -604,7 +604,6 @@ import {
 	scrollToMsg,
     registerChatScrollJumpHandler,
     downloadFile,
-    loadHistory as loadHistoryFirst,
     loadMoreHistoryMessages,
     shouldAutoFocus,
 	vMenu,
@@ -628,7 +627,7 @@ import {
 } from '@renderer/function/utils/msgUtil'
 import { Logger, LogType, PopInfo, PopType } from '@renderer/function/base'
 import { Connector } from '@renderer/function/connect'
-import { appendHistoryForQuotedMessage } from '@renderer/function/msg'
+import { appendHistoryForQuotedMessage, trimChatHistory } from '@renderer/function/msg'
 import { loadHistoryToQuotedMessage } from '@renderer/function/utils/quotedMessage'
 import { keepQuotedMessageInView } from '@renderer/function/utils/quotedScroll'
 import {
@@ -798,7 +797,8 @@ const trueLang = getTrueLang()
 const isDev = import.meta.env.DEV
 const suppressListMoveAnimation = ref(false)
 let searchJumpTimer: ReturnType<typeof setTimeout> | null = null
-let trimReloadPending = false
+let historyTrim: AbortController | undefined
+let nextTrimAt = 0
 const scrollAnchor = createChatScrollAnchor({
     getPan: () => msgPan.value,
     getContent: () => (msgListGroup.value as any)?.$el ?? null,
@@ -811,6 +811,7 @@ const scrollAnchor = createChatScrollAnchor({
     isSuspended: () => replyLoading.value || Boolean(replyAnchor) || details.value[3].open,
     isInputSuspended: () => details.value[3].open,
     onPinnedChange: (pinned) => {
+        if (!pinned) historyTrim?.abort()
         if (pinned) {
             NewMsgNum.value = 0
             tags.value.showBottomButton = false
@@ -917,7 +918,9 @@ watch(() => chat, () => {
         clearTimeout(searchJumpTimer)
         searchJumpTimer = null
     }
-    trimReloadPending = false
+    historyTrim?.abort()
+    historyTrim = undefined
+    nextTrimAt = 0
     suppressListMoveAnimation.value = false
     resetState()
     scrollAnchor.reset(true)
@@ -939,6 +942,7 @@ watch(
     () => details.value[3].open,
     (isSearchOpen) => {
         if (isSearchOpen) {
+            historyTrim?.abort()
             if (!scrollAnchor.isPinnedToBottom()) {
                 scrollAnchor.capture()
             }
@@ -955,9 +959,6 @@ watch(
 watch(
     () => [uiStore.nowGetHistory, uiStore.canLoadHistory, uiStore.loadHistoryFail],
     () => {
-        if (uiStore.loadHistoryFail) {
-            trimReloadPending = false
-        }
         nextTick(() => {
             if (!details.value[3].open && !scrollAnchor.isPinnedToBottom()) {
                 scrollAnchor.reconcile()
@@ -1012,6 +1013,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+    historyTrim?.abort()
     cancelReplyJump()
     registerChatScrollJumpHandler(null)
     if (searchJumpTimer !== null) {
@@ -1202,6 +1204,7 @@ function chatScroll(event: Event, pass: boolean) {
 
 async function loadMoreHistory(reply?: { isActive: () => boolean }) {
     if (uiStore.nowGetHistory || uiStore.canLoadHistory === false || list.length === 0) return false
+    historyTrim?.abort()
     if (!reply) {
         scrollAnchor.setPinnedToBottom(false)
     }
@@ -2885,21 +2888,19 @@ function markFirstLoadedMessagesRead() {
 }
 
 function maybeTrimOversizedList(wasPinned: boolean) {
-    if (list.length <= 200 || uiStore.nowGetHistory || !wasPinned || trimReloadPending) return
-    trimReloadPending = true
-    const info = {
-        type: chat.show.type,
-        id: chat.show.id,
-        name: chat.show.name,
-        avatar: chat.show.avatar,
-        jump: chat.show.jump,
-    } as BaseChatInfoElem
-    void loadHistoryFirst(info, { clearBeforeLoad: false })
-        .then((sent) => {
-            if (!sent) trimReloadPending = false
+    if (list.length <= 200 || !wasPinned || uiStore.nowGetHistory || historyTrim ||
+        replyLoading.value || replyAnchor || details.value[3].open || Date.now() < nextTrimAt) return
+    const request = new AbortController()
+    historyTrim = request
+    nextTrimAt = Date.now() + 10000
+    void trimChatHistory(request.signal)
+        .catch(error => {
+            if (!request.signal.aborted) {
+                new Logger().error(error as Error, '刷新聊天记录失败')
+            }
         })
-        .catch(() => {
-            trimReloadPending = false
+        .finally(() => {
+            if (historyTrim === request) historyTrim = undefined
         })
 }
 
@@ -2983,9 +2984,6 @@ function updateList(newIds: string[], oldIds: string[]) {
     const newLength = newIds.length
     const oldLength = oldIds.length
     const changeKind = classifyMessageListChange(oldIds, newIds)
-    if (newLength <= 200) {
-        trimReloadPending = false
-    }
     if (oldLength == 0 && newLength > 0) {
         markFirstLoadedMessagesRead()
     }
@@ -2997,7 +2995,7 @@ function updateList(newIds: string[], oldIds: string[]) {
     const pan = msgPan.value ?? document.getElementById('msgPan')
     if (pan === null) return
 
-    if (changeKind === 'prepend' || changeKind === 'replace') {
+    if (changeKind === 'prepend' || changeKind === 'replace' || changeKind === 'mixed') {
         suppressListMoveAnimation.value = true
     }
     if (!details.value[3].open && (changeKind === 'prepend' || !wasPinned) && oldLength > 0) {
